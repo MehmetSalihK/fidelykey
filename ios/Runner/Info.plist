@@ -45,7 +45,11 @@
 		<true/>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
 		<true/>
-		<key>UIStatusBarHidden</key>
+	<key>UIStatusBarHidden</key>
 		<false/>
+		<key>NSFaceIDUsageDescription</key>
+		<string>FidelyKey utilise FaceID pour sécuriser l'accès à vos codes.</string>
+		<key>NSCameraUsageDescription</key>
+		<string>FidelyKey a besoin de la caméra pour scanner les QR codes.</string>
 	</dict>
 </plist>
