@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1006453455654",
+    "project_id": "fidelykey-safe-app",
+    "storage_bucket": "fidelykey-safe-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1006453455654:android:c98067996751be213f9fe7",
+        "android_client_info": {
+          "package_name": "com.example.fidely_key"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC-MphDoOkXARDoLaD4m_1FFjJj5aGCFY0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
