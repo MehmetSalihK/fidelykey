@@ -1,0 +1,40 @@
+name: iOS Build
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build_ios:
+    name: Build iOS IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build iOS (No Codesign)
+        run: flutter build ios --release --no-codesign
+
+      - name: Create IPA Structure
+        run: |
+          mkdir Payload
+          mv build/ios/iphoneos/Runner.app Payload/
+
+      - name: Zip to IPA
+        run: zip -r FidelyKey.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FidelyKey-IPA
+          path: FidelyKey.ipa
