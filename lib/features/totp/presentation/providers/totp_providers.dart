@@ -69,6 +69,7 @@ class Accounts extends _$Accounts {
     String algorithm = 'SHA1',
     int digits = 6,
     int period = 30,
+    String category = 'Général',
   }) async {
     state = const AsyncValue.loading();
     state = await AsyncValue.guard(() async {
@@ -82,6 +83,7 @@ class Accounts extends _$Accounts {
         algorithm: algorithm,
         digits: digits,
         period: period,
+        category: category,
         // sortOrder will be handled by repository (appending)
       );
 
@@ -213,7 +215,7 @@ class Accounts extends _$Accounts {
   }
 }
 
-// --- SEARCH PROVIDERS ---
+// --- SEARCH & FILTER PROVIDERS ---
 
 @riverpod
 class SearchQuery extends _$SearchQuery {
@@ -224,16 +226,32 @@ class SearchQuery extends _$SearchQuery {
 }
 
 @riverpod
+class SelectedCategory extends _$SelectedCategory {
+  @override
+  String build() => 'Tous';
+
+  void set(String category) => state = category;
+}
+
+@riverpod
 List<TotpAccount> filteredAccounts(FilteredAccountsRef ref) {
   final accountsAsync = ref.watch(accountsProvider);
   final query = ref.watch(searchQueryProvider).toLowerCase().trim();
+  final category = ref.watch(selectedCategoryProvider);
 
   return accountsAsync.maybeWhen(
     data: (accounts) {
       // 1. Filter
       var filtered = accounts;
+      
+      // Filter by Category
+      if (category != 'Tous') {
+        filtered = filtered.where((a) => a.category == category).toList();
+      }
+
+      // Filter by Search Query
       if (query.isNotEmpty) {
-        filtered = accounts.where((a) {
+        filtered = filtered.where((a) {
           final name = a.accountName.toLowerCase();
           final issuer = (a.issuer ?? '').toLowerCase();
           return name.contains(query) || issuer.contains(query);

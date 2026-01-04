@@ -78,10 +78,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     }
   }
 
+  final List<String> _categories = const ["Tous", "Général", "Travail", "Social", "Finance", "Crypto"];
+
   @override
   Widget build(BuildContext context) {
+    // Watch providers
     final filteredList = ref.watch(filteredAccountsProvider);
     final baseAsync = ref.watch(accountsProvider);
+    final selectedCategory = ref.watch(selectedCategoryProvider);
 
     // Desktop: No Scaffold, just Content
     // Mobile: Scaffold
@@ -101,7 +105,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       );
     } else {
       return Scaffold(
-        appBar: _buildMobileAppBar(context),
+        appBar: _buildMobileAppBar(context, selectedCategory),
         body: _buildBody(context, baseAsync, filteredList, ref),
         floatingActionButton: FloatingActionButton(
           onPressed: () => _showAddOptions(context, ref),
@@ -111,53 +115,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     }
   }
 
-  Widget _buildDesktopHeader(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
-      ),
-      child: Row(
-        children: [
-          Text(
-            'Tableau de bord',
-            style: GoogleFonts.outfit(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const Spacer(),
-          // Search Bar
-          Container(
-            width: 300,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: TextField(
-              controller: _searchController,
-              decoration: const InputDecoration(
-                hintText: 'Rechercher (Ctrl+F)',
-                border: InputBorder.none,
-                icon: Icon(Icons.search),
-              ),
-              onChanged: (val) => ref.read(searchQueryProvider.notifier).set(val),
-            ),
-          ),
-          const SizedBox(width: 16),
-          FilledButton.icon(
-            onPressed: () => _showAddOptions(context, ref),
-            icon: const Icon(Icons.add),
-            label: const Text('Nouveau (Ctrl+N)'),
-          ),
-        ],
-      ),
-    );
-  }
+  // ... _buildDesktopHeader ...
 
-  PreferredSizeWidget _buildMobileAppBar(BuildContext context) {
+  PreferredSizeWidget _buildMobileAppBar(BuildContext context, String selectedCategory) {
     return AppBar(
       title: _isSearchActive
           ? TextField(
@@ -192,6 +152,38 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ),
           const SizedBox(width: 8),
       ],
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(50),
+        child: Container(
+          height: 50,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _categories.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final cat = _categories[index];
+              final isSelected = cat == selectedCategory;
+              return FilterChip(
+                label: Text(cat),
+                selected: isSelected,
+                onSelected: (bool selected) {
+                  ref.read(selectedCategoryProvider.notifier).set(cat);
+                },
+                backgroundColor: Theme.of(context).cardColor,
+                selectedColor: Theme.of(context).colorScheme.primaryContainer,
+                labelStyle: TextStyle(
+                  color: isSelected ? Theme.of(context).colorScheme.onPrimaryContainer : null,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
+                showCheckmark: false,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 

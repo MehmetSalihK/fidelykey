@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../../../../core/services/icon_service.dart';
 
 class ServiceIcon extends StatelessWidget {
   final String issuer;
@@ -12,12 +13,6 @@ class ServiceIcon extends StatelessWidget {
     required this.accountName,
     this.size = 40,
   });
-
-  String get _domain {
-    if (issuer.isEmpty) return '';
-    final cleaned = issuer.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
-    return '$cleaned.com';
-  }
 
   // Fallback color generator based on name
   Color _generateColor(String name) {
@@ -34,26 +29,27 @@ class ServiceIcon extends StatelessWidget {
       return _buildFallback();
     }
 
-    final brandUrl = 'https://cdn.brandfetch.io/$_domain/w/${(size * 2).toInt()}/h/${(size * 2).toInt()}';
+    // Use our global IconService logic
+    final iconUrl = IconService.getIconUrl(issuer);
 
-    // To use Brandfetch efficiently or Clearbit as secondary:
-    // Clearbit: 'https://logo.clearbit.com/$_domain'
+    if (iconUrl == null) {
+      return _buildFallback();
+    }
     
     return ClipRRect(
       borderRadius: BorderRadius.circular(size * 0.25), // Rounded square
-      child: CachedNetworkImage(
-        imageUrl: brandUrl,
-        width: size,
-        height: size,
-        memCacheWidth: (size * 2).toInt(), // Cache smaller version
-        memCacheHeight: (size * 2).toInt(),
-        fit: BoxFit.contain,
-        placeholder: (context, url) => _buildFallback(),
-        errorWidget: (context, url, error) {
-          // Try Clearbit as backup? Or just fallback.
-          // For simplicity, fallback.
-          return _buildFallback();
-        },
+      child: Container(
+        color: Colors.white, // Background for transparent logos
+        child: CachedNetworkImage(
+          imageUrl: iconUrl,
+          width: size,
+          height: size,
+          memCacheWidth: (size * 2).toInt(),
+          memCacheHeight: (size * 2).toInt(),
+          fit: BoxFit.contain, // Contain ensures logos aren't cropped weirdly
+          placeholder: (context, url) => _buildFallback(),
+          errorWidget: (context, url, error) => _buildFallback(),
+        ),
       ),
     );
   }

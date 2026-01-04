@@ -15,5 +15,6 @@ class TotpAccount with _$TotpAccount {
     @Default(0) int sortOrder,
     @Default(false) bool isFavorite,
     @Default(0) int usageCount,
+    @Default('Général') String category,
   }) = _TotpAccount;
 }

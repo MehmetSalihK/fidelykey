@@ -1,128 +1,141 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:async';
-import '../../../../core/utils/otp_auth_parser.dart';
-import '../providers/totp_providers.dart';
+import '../../../../core/services/biometric_service.dart';
 
-class QrScannerScreen extends ConsumerStatefulWidget {
-  const QrScannerScreen({super.key});
-
-  @override
-  ConsumerState<QrScannerScreen> createState() => _QrScannerScreenState();
-}
-
-class _QrScannerScreenState extends ConsumerState<QrScannerScreen> with WidgetsBindingObserver {
-  final MobileScannerController controller = MobileScannerController(
-    detectionSpeed: DetectionSpeed.noDuplicates,
-    returnImage: false,
-  );
-  bool _isProcessing = false;
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
-  }
-
-  void _handleBarcode(BarcodeCapture capture) {
-    if (_isProcessing) return;
-    
-    final List<Barcode> barcodes = capture.barcodes;
-    for (final barcode in barcodes) {
-      final String? code = barcode.rawValue;
-      if (code != null) {
-        // DETECT LOGIN QR
-        if (code.startsWith('fidely-login:')) {
-          _handleLoginRequest(code);
-          return; // Stop processing this capture
-        }
-        
-        // STANDARD TOTP (otpauth://)
-        final uri = code; // Use the raw code directly for parsing
-        final account = OtpAuthParser.parse(uri);
-        
-        if (account != null) {
-          setState(() => _isProcessing = true);
-          // Pause camera to freeze frame
-          controller.stop();
-          
-          // Save and pop
-          ref.read(accountsProvider.notifier).addAccount(
-            secret: account.secretKey,
-            name: account.accountName,
-            issuer: account.issuer ?? '',
-            algorithm: account.algorithm,
-            digits: account.digits,
-            period: account.period,
-          ).then((_) {
-             if (mounted) {
-               ScaffoldMessenger.of(context).showSnackBar(
-                 SnackBar(content: Text('Compte ajouté : ${account.issuer}')),
-               );
-               Navigator.of(context).pop();
-             }
-          });
-          break; 
-        } else {
-          // Invalid format feedback? 
-          // If we want to be strict, we can show error.
-          // But typically we just ignore non-OTP QR codes to avoid spamming errors on random QRs.
-          // User requested: "Affiche une SnackBar d'erreur et reprend le scan"
-          ScaffoldMessenger.of(context).showSnackBar(
-             const SnackBar(
-               content: Text('QR Code invalide ou non supporté (otpauth:// requis)'),
-               duration: Duration(seconds: 2),
-             )
-          );
-        }
-      }
-    }
-  }
+  // ... imports ...
 
   // Handle Login Request
   Future<void> _handleLoginRequest(String code) async {
+    print('DEBUG MOBILE: QR Scan détecté: $code');
     controller.stop(); // Pause scanning
     final requestId = code.replaceAll('fidely-login:', '');
-    
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Connexion PC détectée'),
-        content: const Text('Voulez-vous autoriser la connexion sur cet appareil ?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Refuser')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('AUTORISER')),
-        ],
-      ),
-    );
+    print('DEBUG MOBILE: RequestID extrait: $requestId');
 
-    if (confirm == true) {
-      try {
-        final user = FirebaseAuth.instance.currentUser;
-        if (user == null || user.email == null) throw 'Utilisateur non identifié';
+    try {
+      // 1. Fetch Request Info (to know WHO is asking)
+      final docSnapshot = await FirebaseFirestore.instance.collection('auth_requests').doc(requestId).get();
+      
+      if (!docSnapshot.exists) throw 'Demande expirée ou invalide';
+      final data = docSnapshot.data();
+      final deviceInfo = data?['deviceInfo'] ?? 'Appareil Inconnu';
+      
+      // 2. Show Confirmation Dialog
+      if (!mounted) return;
+      
+      final confirm = await showModalBottomSheet<bool>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (ctx) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(ctx).scaffoldBackgroundColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+               const Icon(Icons.laptop_mac_rounded, size: 64, color: Colors.blueAccent),
+               const SizedBox(height: 16),
+               Text(
+                 'Nouvelle Connexion', 
+                 style: Theme.of(ctx).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)
+               ),
+               const SizedBox(height: 8),
+               Text(
+                 'Voulez-vous connecter cet appareil ?',
+                 textAlign: TextAlign.center,
+                 style: TextStyle(color: Colors.grey),
+               ),
+               const SizedBox(height: 16),
+               Container(
+                 padding: const EdgeInsets.all(12),
+                 decoration: BoxDecoration(
+                   color: Colors.grey.withOpacity(0.1),
+                   borderRadius: BorderRadius.circular(12),
+                 ),
+                 child: Row(
+                   mainAxisAlignment: MainAxisAlignment.center,
+                   children: [
+                     const Icon(Icons.devices, size: 20, color: Colors.grey),
+                     const SizedBox(width: 8),
+                     Text(deviceInfo, style: const TextStyle(fontWeight: FontWeight.w600)),
+                   ],
+                 ),
+               ),
+               const SizedBox(height: 32),
+               Row(
+                 children: [
+                   Expanded(
+                     child: OutlinedButton(
+                       onPressed: () => Navigator.pop(ctx, false),
+                       style: OutlinedButton.styleFrom(
+                         padding: const EdgeInsets.symmetric(vertical: 16),
+                         side: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                       ),
+                       child: const Text('Refuser', style: TextStyle(color: Colors.red)),
+                     ),
+                   ),
+                   const SizedBox(width: 16),
+                   Expanded(
+                     child: FilledButton(
+                       onPressed: () => Navigator.pop(ctx, true),
+                       style: FilledButton.styleFrom(
+                         padding: const EdgeInsets.symmetric(vertical: 16),
+                         backgroundColor: Colors.green,
+                       ),
+                       child: const Text('CONFIRMER'),
+                     ),
+                   ),
+                 ],
+               ),
+               const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      );
 
-        await FirebaseFirestore.instance.collection('auth_requests').doc(requestId).update({
-          'status': 'approved',
-          'email': user.email,
-          'uid': user.uid,
-          'approvedAt': FieldValue.serverTimestamp(),
-        });
-
-        if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connexion autorisée !')));
-           Navigator.pop(context); // Close scanner
-        }
-      } catch (e) {
-        if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
-           controller.start(); // Resume
-        }
+      if (confirm != true) {
+         print('DEBUG MOBILE: Refusé par utilisateur');
+         controller.start();
+         return;
       }
-    } else {
-      controller.start(); // Resume on cancel
+
+      // 3. BIOMETRIC SECURITY CHECK
+      final bioService = BiometricService();
+      final authenticated = await bioService.authenticate();
+      
+      if (!authenticated) {
+         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Authentification requise')));
+         controller.start();
+         return;
+      }
+
+      // 4. Update Firestore
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null || user.email == null) {
+          throw 'Utilisateur non identifié';
+      }
+
+      print('DEBUG MOBILE: Tentative update Firestore...');
+      await FirebaseFirestore.instance.collection('auth_requests').doc(requestId).update({
+        'status': 'approved',
+        'email': user.email,
+        'uid': user.uid,
+        'approvedAt': FieldValue.serverTimestamp(),
+        'approvedByDevice': 'Mobile Scanner', 
+      });
+      print('DEBUG MOBILE: Update Firestore RÉUSSIE !');
+
+      if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connexion autorisée !')));
+          Navigator.pop(context); // Close scanner
+      }
+
+    } catch (e) {
+      print('DEBUG MOBILE EXCEPTION: $e');
+      if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
+          controller.start(); // Resume
+      }
     }
   }
 

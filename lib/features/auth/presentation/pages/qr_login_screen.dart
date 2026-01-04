@@ -1,62 +1,32 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import 'package:uuid/uuid.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:async';
-import 'login_screen.dart';
-import '../../../../core/theme/app_theme.dart';
+import 'dart:io';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart'; // For kIsWeb
 
-class QrLoginScreen extends ConsumerStatefulWidget {
-  const QrLoginScreen({super.key});
+// ... imports ...
 
-  @override
-  ConsumerState<QrLoginScreen> createState() => _QrLoginScreenState();
-}
+  // Helper to get Device Name
+  Future<String> _getDeviceInfo() async {
+    final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+    String deviceName = 'PC Client';
 
-class _QrLoginScreenState extends ConsumerState<QrLoginScreen> with SingleTickerProviderStateMixin {
-  String? _requestId;
-  StreamSubscription<DocumentSnapshot>? _subscription;
-  bool _isApproved = false;
-  String? _approvedEmail;
-
-  // Rotation Logic
-  late AnimationController _timerController;
-  final int _rotationInterval = 30; // Seconds
-
-  @override
-  void initState() {
-    super.initState();
-    // Animation Controller for the progress bar (and timer)
-    _timerController = AnimationController(
-      vsync: this,
-      duration: Duration(seconds: _rotationInterval),
-    )..addStatusListener((status) {
-      if (status == AnimationStatus.completed && !_isApproved) {
-        // Time's up -> Rotate
-        _generateNewCode();
+    try {
+      if (kIsWeb) {
+        final webInfo = await deviceInfo.webBrowserInfo;
+        deviceName = '${webInfo.browserName.name} (${webInfo.platform})';
+      } else if (Platform.isWindows) {
+        final winInfo = await deviceInfo.windowsInfo;
+        deviceName = 'Windows ${winInfo.majorVersion}'; // e.g. Windows 10
+      } else if (Platform.isMacOS) {
+        final macInfo = await deviceInfo.macOsInfo;
+        deviceName = 'Mac ${macInfo.computerName}';
+      } else if (Platform.isLinux) {
+        final linuxInfo = await deviceInfo.linuxInfo;
+        deviceName = 'Linux ${linuxInfo.name}';
       }
-    });
-
-    // Start first cycle
-    _generateNewCode();
-  }
-
-  @override
-  void dispose() {
-    _cleanupOldRequest(); // Delete current doc on exit
-    _timerController.dispose();
-    _subscription?.cancel();
-    super.dispose();
-  }
-
-  /// Cleans up the previous/current request from Firestore
-  void _cleanupOldRequest() {
-    final oldId = _requestId;
-    if (oldId != null && !_isApproved) {
-      // Fire and forget delete
-      FirebaseFirestore.instance.collection('auth_requests').doc(oldId).delete();
+    } catch (e) {
+      print('Error getting device info: $e');
     }
+    return deviceName;
   }
 
   Future<void> _generateNewCode() async {
@@ -68,16 +38,35 @@ class _QrLoginScreenState extends ConsumerState<QrLoginScreen> with SingleTicker
 
     // 2. Generate New ID
     final uuid = const Uuid().v4();
+    print('DEBUG PC: Génération nouveau code: $uuid');
     
-    // 3. Create Doc
+    // 3. Get Device Info
+    final deviceInfo = await _getDeviceInfo(); // NEW
+    
+    // 4. Create Doc
     final docRef = FirebaseFirestore.instance.collection('auth_requests').doc(uuid);
-    await docRef.set({
-      'requestId': uuid,
-      'status': 'pending',
-      'createdAt': FieldValue.serverTimestamp(),
-      'platform': 'PC/Web',
-      'expiresAt': DateTime.now().add(Duration(seconds: _rotationInterval)).toIso8601String(),
-    });
+    
+    try {
+      print('DEBUG PC: Tentative de création du document Firestore...');
+      await docRef.set({
+        'requestId': uuid,
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+        'platform': 'PC/Web',
+        'deviceInfo': deviceInfo, // NEW
+        'expiresAt': DateTime.now().add(Duration(seconds: _rotationInterval)).toIso8601String(),
+      });
+      print('DEBUG PC: Document créé avec succès.');
+    } catch (e) {
+      // ... error handling ...
+      print('DEBUG PC CLOUD ERROR: $e');
+      if (mounted) {
+         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+           content: Text('Erreur Firestore (PC): $e'), backgroundColor: Colors.red,
+         ));
+      }
+      return;
+    }
 
     if (!mounted) return;
 
@@ -85,65 +74,41 @@ class _QrLoginScreenState extends ConsumerState<QrLoginScreen> with SingleTicker
       _requestId = uuid;
     });
 
-    // 4. Start Listen
+    // ... listening logic ...
+    print('DEBUG PC: Écoute des changements sur $uuid...');
     _subscription = docRef.snapshots().listen((snapshot) {
-      if (!snapshot.exists) return;
+      if (!snapshot.exists) {
+         print('DEBUG PC: Doc supprimé ou inexistant.');
+         return;
+      }
       final data = snapshot.data();
       if (data == null) return;
 
       final status = data['status'] as String?;
+      print('DEBUG PC: Changement statut détecté -> $status');
+
       if (status == 'approved') {
         final email = data['email'] as String?;
+        print('DEBUG PC: APPROUVÉ ! Email reçu: $email');
         if (email != null) {
           _handleApproval(email);
         }
       }
+    }, onError: (e) {
+       print('DEBUG PC STREAM ERROR: $e');
     });
 
-    // 5. Restart Timer
+    // ... timer logic ...
     _timerController.reset();
     _timerController.forward();
   }
 
-  void _handleApproval(String email) {
-    if (_isApproved) return; // Already handled
-    
-    // Stop rotation
-    _timerController.stop();
-    _subscription?.cancel();
-    
-    // Update State
-    setState(() {
-      _isApproved = true;
-      _approvedEmail = email;
-    });
-
-    // Clean up doc immediately to prevent reuse (optional, or keep for logs)
-    if (_requestId != null) {
-       FirebaseFirestore.instance.collection('auth_requests').doc(_requestId).delete();
-    }
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Appareil détecté ! Redirection...')),
-    );
-
-    // Initial Delay for UX
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      // Navigate to Login with Email Pre-filled
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => LoginScreen(initialEmail: _approvedEmail),
-        ),
-      );
-    });
-  }
+  // ... _handleApproval ...
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context); // Access TextTheme and Colors
+
     return Scaffold(
       appBar: AppBar(title: const Text('Connexion par QR Code')),
       body: Center(
@@ -151,6 +116,7 @@ class _QrLoginScreenState extends ConsumerState<QrLoginScreen> with SingleTicker
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (_isApproved)
+               // ... existing success UI ...
                Column(
                  mainAxisSize: MainAxisSize.min,
                  children: [
@@ -158,7 +124,7 @@ class _QrLoginScreenState extends ConsumerState<QrLoginScreen> with SingleTicker
                    const SizedBox(height: 16),
                    Text(
                      'Compte trouvé !', 
-                     style: Theme.of(context).textTheme.headlineSmall,
+                     style: theme.textTheme.headlineSmall,
                    ),
                    const SizedBox(height: 8),
                    Text(_approvedEmail ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -174,15 +140,15 @@ class _QrLoginScreenState extends ConsumerState<QrLoginScreen> with SingleTicker
                     return ScaleTransition(scale: animation, child: child);
                   },
                   child: Container(
-                    key: ValueKey<String>(_requestId!), // Triggers animation on ID change
-                    padding: const EdgeInsets.all(16),
+                    key: ValueKey<String>(_requestId!),
+                    padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(24),
                       boxShadow: [
                          BoxShadow(
-                           color: Colors.black.withOpacity(0.1),
-                           blurRadius: 20,
+                           color: theme.colorScheme.primary.withOpacity(0.2), // Colored shadow
+                           blurRadius: 30,
                            spreadRadius: 5,
                          )
                       ],
@@ -190,7 +156,22 @@ class _QrLoginScreenState extends ConsumerState<QrLoginScreen> with SingleTicker
                     child: QrImageView(
                       data: 'fidely-login:$_requestId',
                       version: QrVersions.auto,
-                      size: 250.0,
+                      size: 260.0,
+                      // STYLED QR CODE
+                      eyeStyle: QrEyeStyle(
+                        eyeShape: QrEyeShape.circle,
+                        color: theme.colorScheme.primary,
+                      ),
+                      dataModuleStyle: QrDataModuleStyle(
+                        dataModuleShape: QrDataModuleShape.circle,
+                        color: theme.colorScheme.primary.withOpacity(0.8), // Slightly lighter?
+                      ),
+                      // EMBEDDED IMAGE
+                      embeddedImage: const AssetImage('lib/assets/icon/logo.png'), 
+                      embeddedImageStyle: const QrEmbeddedImageStyle(
+                        size: Size(50, 50),
+                      ),
+                      errorCorrectionLevel: QrErrorCorrectLevel.H, // High error correction for logo
                     ),
                   ),
                 ),
@@ -198,33 +179,16 @@ class _QrLoginScreenState extends ConsumerState<QrLoginScreen> with SingleTicker
                 const SizedBox(height: 32),
                 
                 // Instructions
-                const Text(
-                  'Scannez avec votre mobile connecté',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                Text(
+                  'Scannez avec votre mobile',
+                  style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'Le code change toutes les 30s pour votre sécurité',
-                  style: TextStyle(color: Colors.grey),
+                Text(
+                  'Code sécurisé unique',
+                  style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey),
                 ),
-
-                const SizedBox(height: 24),
-                
-                // Progress Bar
-                SizedBox(
-                  width: 200,
-                  child: AnimatedBuilder(
-                    animation: _timerController,
-                    builder: (context, child) {
-                      return LinearProgressIndicator(
-                        value: 1.0 - _timerController.value, // Countdown
-                        backgroundColor: Colors.grey.withOpacity(0.2),
-                        color: Theme.of(context).colorScheme.primary,
-                        borderRadius: BorderRadius.circular(4),
-                      );
-                    },
-                  ),
-                ),
+                // ...
             ],
           ],
         ),

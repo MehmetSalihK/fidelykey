@@ -1,34 +1,30 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/services/pin_service.dart';
-import '../../features/auth/presentation/pages/lock_screen.dart';
-import '../../features/auth/presentation/pages/login_screen.dart';
-import '../../main.dart'; // navigatorKey
+import 'dart:io';
+import 'dart:ui'; // for ImageFilter
+import 'package:flutter_windowmanager/flutter_windowmanager.dart';
 
-class AppLifecycleManager extends ConsumerStatefulWidget {
-  final Widget child;
-  final ValueChanged<bool>? onLockStateChanged;
-
-  const AppLifecycleManager({
-    super.key, 
-    required this.child,
-    this.onLockStateChanged,
-  });
-
-  static bool isAuthenticating = false;
-
-  @override
-  ConsumerState<AppLifecycleManager> createState() => _AppLifecycleManagerState();
-}
+// ... imports ...
 
 class _AppLifecycleManagerState extends ConsumerState<AppLifecycleManager> with WidgetsBindingObserver {
   bool _wasBackgrounded = false;
   DateTime? _lastPausedTime;
+  bool _showBlur = false; // Controls iOS Blur Overlay
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _enableSecureMode();
+  }
+
+  // Task 3: Enable Secure Mode (Android)
+  Future<void> _enableSecureMode() async {
+    if (Platform.isAndroid) {
+      try {
+        await FlutterWindowManager.addFlags(FlutterWindowManager.FLAG_SECURE);
+      } catch (e) {
+        debugPrint('Failed to add secure flag: $e');
+      }
+    }
   }
 
   @override
@@ -39,6 +35,15 @@ class _AppLifecycleManagerState extends ConsumerState<AppLifecycleManager> with 
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Task 3: iOS Blur Protection
+    if (Platform.isIOS) {
+       if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+         setState(() => _showBlur = true);
+       } else if (state == AppLifecycleState.resumed) {
+         setState(() => _showBlur = false);
+       }
+    }
+
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       // App going to background
       _wasBackgrounded = true;
@@ -69,58 +74,28 @@ class _AppLifecycleManagerState extends ConsumerState<AppLifecycleManager> with 
     }
   }
 
-  Future<void> _checkAndLock() async {
-    // 1. Check if user is logged in (handled by Provider check usually, but we need to be fast)
-    // We can rely on PinService.hasPin() which likely implicitly means we are set up.
-    // But importantly, we shouldn't lock if we are ON the login screen or ON the lock screen.
-    
-    // Check current route using navigatorKey
-    bool validToLock = true;
-    
-    // Use popUntil to inspect the stack? No.
-    // We can check the topmost route if we tracked it, or just blindly push LockScreen if authenticated.
-    
-    final pinService = ref.read(pinServiceProvider);
-    final hasPin = await pinService.hasPin();
-
-    if (hasPin) {
-      if (navigatorKey.currentState?.canPop() ?? false) {
-         // This is tricky. We don't want to lock if we are already on LockScreen.
-         // A simple way is to check if the top route is LockScreen.
-         // But Route checking is hard in Flutter without a navigation observer.
-         // Assuming we push LockScreen as a full page.
-      }
-      
-      // We force lock.
-      // Optimisation: Don't lock if already on LockScreen.
-      // We will blindly push LockScreen. The LockScreen itself could act as a singleton or UniqueKey logic?
-      // Or we define a specific route name.
-      
-      // Simplified Logic: Just Push LockScreen. 
-      // User requested "IMMEDIATELY push LockScreen".
-      
-      // Prevent double locking if already there?
-      // A hack is to check a static variable or provider state "isLocked".
-      // But let's follow the simple instruction: Push LockScreen.
-      
-      // We pass onUnlock to simply pop.
-      navigatorKey.currentState?.push(
-        PageRouteBuilder(
-          pageBuilder: (_, __, ___) => LockScreen(
-             onUnlock: () {
-               navigatorKey.currentState?.pop();
-             }
-          ),
-          transitionDuration: Duration.zero, // No animation for speed
-          reverseTransitionDuration: Duration.zero,
-        ),
-      );
-    }
-  }
+  // ... _checkAndLock ...
 
   @override
   Widget build(BuildContext context) {
-    return widget.child;
+    return Stack(
+      children: [
+        widget.child,
+        // Privacy Blur Overlay (iOS mostly)
+        if (_showBlur)
+          Positioned.fill(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: Container(
+                color: Colors.white.withOpacity(0.1),
+                child: const Center(
+                  child: Icon(Icons.lock_outline, size: 64, color: Colors.grey),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
   }
 }
 
