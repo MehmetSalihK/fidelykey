@@ -14,6 +14,7 @@ import '../../../totp/presentation/providers/totp_providers.dart';
 import '../providers/auth_provider.dart';
 import '../pages/create_pin_screen.dart'; // Import for redirection
 import '../pages/login_screen.dart'; // Import for Logout
+import '../../../../core/widgets/app_lifecycle_manager.dart'; // Import for isAuthenticating flag
 
 
 class LockScreen extends ConsumerStatefulWidget {
@@ -87,18 +88,27 @@ class _LockScreenState extends ConsumerState<LockScreen> with SingleTickerProvid
     if (_isAuthenticating) return;
     setState(() => _isAuthenticating = true);
 
-    final authenticated = await _biometricService.authenticate();
-    
-    if (mounted) {
-      setState(() => _isAuthenticating = false);
-      if (authenticated) {
-        _unlock();
-      } else {
-        setState(() {
-           _statusMessage = 'Biométrie échouée';
-           _showPinPad = true; 
-        });
+    // Protection: Signal that we are intentionally invoking a system dialog
+    // This prevents AppLifecycleManager from locking the app when we return.
+    AppLifecycleManager.isAuthenticating = true;
+
+    try {
+      final authenticated = await _biometricService.authenticate();
+      
+      if (mounted) {
+        if (authenticated) {
+          _unlock();
+        } else {
+          setState(() {
+             _statusMessage = 'Biométrie échouée';
+             _showPinPad = true; 
+          });
+        }
       }
+    } finally {
+      // Always reset the flag, even if auth crashes
+      AppLifecycleManager.isAuthenticating = false;
+      if (mounted) setState(() => _isAuthenticating = false);
     }
   }
 

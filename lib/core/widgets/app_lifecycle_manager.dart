@@ -15,12 +15,15 @@ class AppLifecycleManager extends ConsumerStatefulWidget {
     this.onLockStateChanged,
   });
 
+  static bool isAuthenticating = false;
+
   @override
   ConsumerState<AppLifecycleManager> createState() => _AppLifecycleManagerState();
 }
 
 class _AppLifecycleManagerState extends ConsumerState<AppLifecycleManager> with WidgetsBindingObserver {
   bool _wasBackgrounded = false;
+  DateTime? _lastPausedTime;
 
   @override
   void initState() {
@@ -39,11 +42,29 @@ class _AppLifecycleManagerState extends ConsumerState<AppLifecycleManager> with 
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       // App going to background
       _wasBackgrounded = true;
+      _lastPausedTime = DateTime.now();
     } else if (state == AppLifecycleState.resumed) {
       // App coming to foreground
-      if (_wasBackgrounded) {
+      
+      // CRITICAL FIX: Ignore if we are currently authenticating (biometric dialog)
+      if (AppLifecycleManager.isAuthenticating) {
+        debugPrint('AppLifecycleManager: Ignoring resume because authentication is in progress.');
+        return;
+      }
+
+      if (_wasBackgrounded && _lastPausedTime != null) {
+        // CRITICAL FIX: Ignore short interruptions (< 500ms) like FaceID dialogs
+        final duration = DateTime.now().difference(_lastPausedTime!);
+        if (duration.inMilliseconds < 500) {
+           debugPrint('AppLifecycleManager: Short pause detected (${duration.inMilliseconds}ms), ignoring lock.');
+           _wasBackgrounded = false;
+           _lastPausedTime = null;
+           return;
+        }
+
         _checkAndLock();
         _wasBackgrounded = false;
+        _lastPausedTime = null;
       }
     }
   }
